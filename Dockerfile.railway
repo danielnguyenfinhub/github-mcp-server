@@ -33,12 +33,10 @@ COPY . .
 COPY --from=ui-build /app/pkg/github/ui_dist/* ./pkg/github/ui_dist/
 
 # Build the server
-# OAuth credentials are injected via build secrets so they are not baked into image history; the values are public in practice but kept out of layers.
-RUN --mount=type=secret,id=oauth_client_id \
-    --mount=type=secret,id=oauth_client_secret \
-    export OAUTH_CLIENT_ID="$(cat /run/secrets/oauth_client_id 2>/dev/null || echo '')" && \
-    export OAUTH_CLIENT_SECRET="$(cat /run/secrets/oauth_client_secret 2>/dev/null || echo '')" && \
-    CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X github.com/github/github-mcp-server/internal/buildinfo.OAuthClientID=${OAUTH_CLIENT_ID} -X github.com/github/github-mcp-server/internal/buildinfo.OAuthClientSecret=${OAUTH_CLIENT_SECRET}" \
+# Railway's builder only supports type=cache mounts (not type=secret), and this
+# deployment serves the multi-tenant `http` transport, which never uses the
+# stdio command's baked-in OAuth app client — so build without OAuth ldflags.
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o /bin/github-mcp-server ./cmd/github-mcp-server
 
 # Make a stage to run the app
