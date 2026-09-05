@@ -1,3 +1,13 @@
+# Railway deployment variant of the root Dockerfile.
+#
+# Railway's builder requires cache-mount ids in the form
+# "s/<service-id>-<path>" (see https://docs.railway.com/builds/dockerfiles#cache-mounts),
+# which would couple the shared Dockerfile to one specific Railway service.
+# This variant drops the cache mounts instead so it stays portable, and
+# defaults to the streamable HTTP transport (`http`) rather than `stdio`,
+# since Railway serves the container over the network rather than piping
+# stdio to it. Point RAILWAY_DOCKERFILE_PATH / the service's Dockerfile
+# path at this file to use it.
 FROM node:26-alpine@sha256:a2dc166a387cc6ca1e62d0c8e265e49ca985d6e60abc9fe6e6c3d6ce8e63f606 AS ui-build
 WORKDIR /app
 COPY ui/package*.json ./ui/
@@ -14,8 +24,7 @@ ARG VERSION="dev"
 WORKDIR /build
 
 # Install git
-RUN --mount=type=cache,target=/var/cache/apk \
-    apk add git
+RUN apk add git
 
 # Copy source code (including ui_dist placeholder)
 COPY . .
@@ -25,9 +34,7 @@ COPY --from=ui-build /app/pkg/github/ui_dist/* ./pkg/github/ui_dist/
 
 # Build the server
 # OAuth credentials are injected via build secrets so they are not baked into image history; the values are public in practice but kept out of layers.
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=secret,id=oauth_client_id \
+RUN --mount=type=secret,id=oauth_client_id \
     --mount=type=secret,id=oauth_client_secret \
     export OAUTH_CLIENT_ID="$(cat /run/secrets/oauth_client_id 2>/dev/null || echo '')" && \
     export OAUTH_CLIENT_SECRET="$(cat /run/secrets/oauth_client_secret 2>/dev/null || echo '')" && \
@@ -48,5 +55,6 @@ COPY --from=build /bin/github-mcp-server .
 EXPOSE 8082
 # Set the entrypoint to the server binary
 ENTRYPOINT ["/server/github-mcp-server"]
-# Default arguments for ENTRYPOINT
-CMD ["stdio"]
+# Serve streamable HTTP on all interfaces; Railway routes to this port via
+# its target-port setting (PORT is not read by the server, see cmd/github-mcp-server).
+CMD ["http", "--listen-host", "0.0.0.0", "--port", "8082"]
